@@ -43,7 +43,7 @@ class DecoderRNN(nn.Module):
                             num_layers=self.num_layers)
         
         # init hidden layer weights
-        # self.hidden_cell_state = self.init_hidden(self.batch_size)
+        self.hidden_cell_state = self.init_hidden(self.batch_size)
         
         ### Dropout layer (as suggested by https://arxiv.org/pdf/1411.4555)
         self.dropout = nn.Dropout(self.drop_prob)
@@ -68,10 +68,13 @@ class DecoderRNN(nn.Module):
         
     def init_hidden(self, batch_size):
         ''' Initializes hidden state '''
+        # Setup the GPU device
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        
         # Create two new tensors with sizes n_layers x batch_size x n_hidden,
         # Randomly initialization for hidden state and cell state of LSTM
-        hidden = (torch.rand(self.num_layers, batch_size, self.hidden_size),
-                    torch.rand(self.num_layers, batch_size, self.hidden_size))
+        hidden = (torch.rand(self.num_layers, batch_size, self.hidden_size).to(device),
+                    torch.rand(self.num_layers, batch_size, self.hidden_size).to(device))
         return hidden
         
     def forward(self, features, captions):
@@ -80,7 +83,6 @@ class DecoderRNN(nn.Module):
         #   + Extract captions without the last stop word: <end> 
         #   + Create embedded word vectors with size [batch_size, seq_len, embed_size]
         embeddings = self.embed(captions[:, :-1])  # Exclude the <end> token
-        
         batch_size = captions.shape[0]
         seq_len = captions.shape[1]
         if self.batch_size != batch_size:
