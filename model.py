@@ -111,5 +111,13 @@ class DecoderRNN(nn.Module):
         return outputs
 
     def sample(self, inputs, states=None, max_len=20):
-        " accepts pre-processed image tensor (inputs) and returns predicted sentence (list of tensor ids of length max_len) "
-        pass
+        """ accepts pre-processed image tensor (inputs) and 
+        returns predicted sentence (list of tensor ids of length max_len) """
+        predicted_sentence = []
+        for i in range(max_len):
+            hiddens, states = self.lstm(inputs, states)
+            outputs = self.hidden2Vocab(hiddens.squeeze(1))
+            _, predicted = outputs.max(1)
+            predicted_sentence.append(predicted.item())
+            inputs = self.embed(predicted).unsqueeze(1)
+        return predicted_sentence
