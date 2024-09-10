@@ -1,12 +1,14 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
-
+from torchvision.models import resnet18
 
 class EncoderCNN(nn.Module):
     def __init__(self, embed_size):
         super(EncoderCNN, self).__init__()
-        resnet = models.resnet50(pretrained=True)
+        #resnet = models.resnet50(pretrained=True)
+        # Using ResNet-34 for a lighter model
+        resnet = models.resnet18(weights='DEFAULT')
         for param in resnet.parameters():
             param.requires_grad_(False)
         
@@ -40,7 +42,8 @@ class DecoderRNN(nn.Module):
         # and output the hidden states (short-term memory) with size of hidden_size
         self.lstm = nn.LSTM(input_size=self.embed_size, 
                             hidden_size=self.hidden_size,
-                            num_layers=self.num_layers)
+                            num_layers=self.num_layers,
+                            batch_first=True)
         
         # init hidden layer weights
         self.hidden_cell_state = self.init_hidden(self.batch_size)
@@ -82,9 +85,11 @@ class DecoderRNN(nn.Module):
         # Create embedded word vectors for captions [batch_size, seq_len]
         #   + Extract captions without the last stop word: <end> 
         #   + Create embedded word vectors with size [batch_size, seq_len, embed_size]
+        # embeddings size: [batch_size, vocab_size, embed_size]
         embeddings = self.embed(captions[:, :-1])  # Exclude the <end> token
         batch_size = captions.shape[0]
         seq_len = captions.shape[1]
+        #print(f'batch_size ={batch_size}, seq_len = {seq_len}')
         if self.batch_size != batch_size:
             self.batch_size = batch_size
             # init hidden layer weights
@@ -95,21 +100,39 @@ class DecoderRNN(nn.Module):
         features = features.view(self.batch_size, 1, -1)
         
         # Concat the image feature tensor to the first position of embedded_word_vectors
-        # reshape inputs to [seq_len, batch_size, embed_size]
-        inputs = torch.cat((features, embeddings), dim=1).view(seq_len, batch_size, -1) 
+        # inputs size [batch_size, seq_len, embed_size]
+        inputs = torch.cat((features, embeddings), dim=1)
         
         ### Pass the inputs through the LSTM to get output
+        # outputs size: [batch_size, seq_len, embed_size]
         outputs, self.hidden_cell_state = self.lstm(inputs, self.hidden_cell_state)
-        # Reshape the outputs to [batch_size * seq_len, hidden_size] required by Project
-        outputs = outputs.view(-1, self.hidden_size)
         
         ### Pass the output to the Dropout layer
         outputs = self.dropout(outputs)
         
+        # Reshape the outputs to [batch_size * seq_len, hidden_size] required by Project
+        outputs = outputs.reshape(batch_size * seq_len, self.hidden_size)
+        
         ### Pass the LSTM output through Linear to get the next word
         outputs = self.hidden2Vocab(outputs)
+        
+        ## Reshape the outputs to a new shape required by the project
+        # outptus size: [batch_size, seq_len, vocab_size]
+        outputs = outputs.view(batch_size, seq_len, -1)
+        
+        # Check that your decoder satisfies some requirements of the project! :D        
+        assert type(outputs)==torch.Tensor, "Decoder output needs to be a PyTorch Tensor."
+        assert (outputs.shape[0]==batch_size) & (outputs.shape[1]==captions.shape[1]) & (outputs.shape[2]==self.vocab_size), "The shape of the decoder output is incorrect."
         return outputs
 
     def sample(self, inputs, states=None, max_len=20):
-        " accepts pre-processed image tensor (inputs) and returns predicted sentence (list of tensor ids of length max_len) "
-        pass
+        """ accepts pre-processed image tensor (inputs) and 
+        returns predicted sentence (list of tensor ids of length max_len) """
+        predicted_sentence = []
+        for i in range(max_len):
+            hiddens, states = self.lstm(inputs, states)
+            outputs = self.hidden2Vocab(hiddens.squeeze(1))
+            _, predicted = outputs.max(1)
+            predicted_sentence.append(predicted.item())
+            inputs = self.embed(predicted).unsqueeze(1)
+        return predicted_sentence
